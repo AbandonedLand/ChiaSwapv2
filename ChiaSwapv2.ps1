@@ -209,8 +209,8 @@ function New-ChiaSwapStrategy{
         TradeTable = (New-GridTradingTable  -TokenX $TokenX -TokenY $TokenY -CurrentPrice $StartingPrice -FeeCharged $FeeCharged -PriceDelta $PriceDelta -NumberOfRows $NumberOfRows -MaxRiskInXCH $MaxRiskInXCH)
         isActive = $true
         currentPosition = [decimal](($NumberOfRows/2)-0.5)
-        activeOffers =@()
-        completedOffers = @()
+        activeOffers =@{}
+        completedOffers = @{}
         createdAt = (get-date)
     } | Add-MdbcData -ErrorAction Ignore
 
