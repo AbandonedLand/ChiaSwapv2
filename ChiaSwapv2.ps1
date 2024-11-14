@@ -14,6 +14,7 @@ Class TokenFactory{
     }
 }
 
+
 Class Token{
     $id
     $code
@@ -195,9 +196,13 @@ function New-ChiaSwapStrategy{
 
     Connect-Mdbc . chiaswap strategy
     
+    
 
     [ordered]@{
         _id = $name
+        MinPrice = ($StartingPrice - $PriceDelta)
+        MaxPrice = ($StartingPrice + $PriceDelta)
+        InitialPrice = $StartingPrice
         TokenY = $TokenY
         TokenX = $TokenX
         FeeCharged = $FeeCharged
@@ -208,6 +213,7 @@ function New-ChiaSwapStrategy{
         isActive = $true
         currentPosition = [decimal](($NumberOfRows/2)-0.5)
         activeOffers =@{}
+        profitLoss=@()
         completedOffers = @{}
         createdAt = (get-date)
     } | Add-MdbcData -ErrorAction Ignore
@@ -228,36 +234,273 @@ Class ChiaStrategy{
         }
     }
 
-    createOfferForPosition($position,$side){
 
+    createOffersForCurrentPosition(){
+        $bidPosition = [int]($this.currentPosition - 0.5)
+        $askPosition = [int]($this.currentPosition + 0.5)
+
+        $this.createOfferForPosition($bidPosition,"Bid")
+        $this.createOfferForPosition($askPosition,"Ask")
     }
 
-
-    addActiveOfferbyDexieId($dexieId){
+    static [array] allActive(){
+        $strategies = @()
         Connect-Mdbc . chiaswap strategy
-        try {
-            $uri = -join("https://dexie.space/v1/offers/",$dexieId)
-            $request = Invoke-RestMethod -Uri $uri -Method Get
-            if($request.offer){
-                $this.activeOffers.($request.offer.id) = $request.offer
-                $this.save()
-            }
-        } catch{
-            Write-Error "Failed to update"
+        foreach($strat in (Get-MdbcData @{isActive=$true})){
+            $strategies += [ChiaStrategy]::new($strat._id)
+        }
+        return $strategies
+    }
+
+    createNOffersfromCurrentPosition([int]$n){
+        $bidPosition = [int]($this.currentPosition - 0.5)
+        $askPosition = [int]($this.currentPosition + 0.5)
+        ($bidPosition - ($n-1))..$bidPosition | ForEach-Object {
+            $this.createOfferForPosition($_,"Bid")
+            #Write-Information "Creating Bid at position $_"
+            start-sleep 2
+        }
+        $askPosition..($askPosition + ($n-1)) | ForEach-Object {
+            #Write-Information "Creating Ask at position $_"
+            $this.createOfferForPosition($_,"Ask")
+            start-sleep 2
         }
     }
 
-    [pscustomobject] checkDexieOffers([array]$ids){
+    createOfferForPosition([int]$position,[string]$side){
+        if($side -notin "bid", "ask"){
+            throw "Side must be either bid or ask"
+        }
+        if($position -lt 0 -OR $position -gt 99){
+            throw "Position is out of range."
+        }
+        # force Title Case on Side
+        $textInfo = (Get-Culture).TextInfo
+        $side = $textInfo.ToTitleCase($side)
+
+
+        # Check to see if offer exists
+        $check = $this.activeOffers.getEnumerator() | ForEach-Object {$_.Value | Where-Object {$_.position -eq $position -and $_.side -eq $side}}
+
+        if(!$check){
+            $json = @{
+                offer = ($this.TradeTable[$position].$side.offer)
+                fee=0
+                reuse_puzhash = $true
+            } | ConvertTo-Json
+            
+            
+            $offer = $this.makeOffer($json)
+            if($offer){
+                $dexieResponse = $this.postOfferToDexie($offer)
+                if($dexieResponse){
+                    $this.addActiveOffer($dexieResponse,$offer,$position,$side)
+                } else {
+                    throw "Dexie did not process offer"
+                }
+    
+            } else {
+                throw "Failed to create offer."
+            }
+        } else {
+            $message = -join("Offer exists for Position: ",$position," Side: ",$side)
+            Write-Information $message
+        }
+    }
+
+
+    addActiveOffer($dexieResponse, $offer, $position, $side){
+        if(!$this.activeOffers.($dexieResponse.id)){
+            $this.activeOffers.($dexieResponse.id) = [ordered]@{
+                position = $position
+                side = $side
+                dexieResponse = $dexieResponse
+                offer = $offer
+            }
+            $this.save()
+        }
+        
+    }
+
+    [pscustomobject]makeOffer($json){
+        $offer = chia rpc wallet create_offer_for_ids $json | ConvertFrom-Json
+        if(!($offer)){
+            throw "Offer failed to create"
+        }
+        return $offer
+    }
+
+    [pscustomobject]postOfferToDexie($offer){
+        $payload = @{
+            offer = $offer.offer
+        } | ConvertTo-Json
+        $response = Invoke-RestMethod -Uri 'https://api.dexie.space/v1/offers' -Method Post -Body $payload -ContentType "application/json" -RetryIntervalSec 5 -MaximumRetryCount 2 
+        if(!($response)){
+            throw "Error posting offer to dexie"
+        }
+        return $response
+    }
+
+
+    checkActiveOffers(){
+        # Entry point to check offers and make changes if needed.
+        $ids = @()
+        $this.activeOffers.GetEnumerator() | ForEach-Object {
+            $ids += $_.Key
+        }
+        if($ids){
+            
+            $response = $this.getDexieBulkOfferStatus($ids)
+            foreach($offer in $response.offers){
+                # Offer Taken
+                if($offer.status -eq 4){
+                    $this.offerTaken($offer)
+                    $this.save()
+                    
+                }
+                # Offer canceled or expired
+                if($offer.status -eq 3 -OR $offer.status -eq 6){
+                    $this.offerNotActive($offer)
+                    $this.save()
+                }
+            }
+
+        } else {
+            Write-Information "No active IDs found"
+        }
+        
+        
+        
+    }
+
+    offerNotActive($offer){
+        if(!$offer){
+            throw "No offer found"
+        }
+
+        if($this.completedOffers.($offer.id)){
+            throw "Offer already marked as completed"
+        }
+        if(!$this.activeOffers.($offer.id)){
+            throw "No Active Offer found"
+        }
+        $this.activeOffers.remove($offer.id)
+    }
+
+    offerTaken($offer){
+        if(!$offer){
+            throw "No offer found"
+        }
+
+        if($this.completedOffers.($offer.id)){
+            throw "Offer already marked as completed"
+        }
+        
+        $active = $this.activeOffers.($offer.id)
+        
+        if(!$active){
+            $message = -join("No active offer found for ",$offer.id)
+            throw $message
+        }
+
+        $this.completedOffers.($offer.id) = @{
+            'dexie_id' = $offer.id
+            'position' = $active.position
+            'side' = $active.side
+            'offered' = $active.dexieResponse.offer.offered
+            'requested' = $active.dexieResponse.offer.requested
+            'date_found' = $offer.date_found
+            'date_completed' = $offer.date_completed
+            'trade_id' = $offer.trade_id
+        }
+        if($active.side -eq "Ask"){
+            $this.currentPosition = $this.currentPosition + 1
+        }
+
+        if($active.side -eq "Bid"){
+            $this.currentPosition = $this.currentPosition - 1
+        }
+
+        if(!($this.profitLoss | Where-Object {$_.dexieId -eq $offer.id})){
+
+            $TokenX = $null
+            $TokenY = $null
+            if($active.dexieResponse.offer.offered | Where-Object {$_.code -eq $this.TokenX.code}){
+                $TokenX = -($active.dexieResponse.offer.offered | Where-Object {$_.code -eq $this.TokenX.code}).amount
+            } 
+            if($active.dexieResponse.offer.offered | Where-Object {$_.code -eq $this.TokenY.code}){
+                $TokenY = -($active.dexieResponse.offer.offered | Where-Object {$_.code -eq $this.TokenY.code}).amount
+            }
+            if($active.dexieResponse.offer.requested | Where-Object {$_.code -eq $this.TokenX.code}){
+                $TokenX = ($active.dexieResponse.offer.requested | Where-Object {$_.code -eq $this.TokenY.code}).amount
+            }
+            if($active.dexieResponse.offer.requested | Where-Object {$_.code -eq $this.TokenY.code}){
+                $TokenY = ($active.dexieResponse.offer.requested | Where-Object {$_.code -eq $this.TokenY.code}).amount
+            }
+
+            if(!$TokenX){
+                throw "TokenX not found"
+            }
+            if(!$TokenY){
+                throw "TokenY not found"
+            }
+
+
+            $this.profitLoss += [ordered]@{
+                dexieId = $offer.id
+                tokenY = $TokenY
+                tokenX = $TokenX
+                price = ($tokenY / -($TokenX))
+            }
+        }
+        
+        # Remove the offer data from active offers
+        $this.activeOffers.remove($offer.id)
+
+        # Create next set of offers.
+        $this.createOffersForCurrentPosition()
+
+    }
+
+    
+    
+
+
+
+    [pscustomobject] getDexieBulkOfferStatus([array]$ids){
         $payload = @{'ids'=$ids}
         return Invoke-RestMethod -Method Post -Body ($payload | ConvertTo-Json) -Uri "https://api.dexie.space/v1/offersBatch" -ContentType "Application/json"
     }
 
+    initiateStrategy(){
+        
+        Connect-Mdbc . chiaswap strategy
+        
+        $ask = [int]($this.currentPosition + 0.5)
+        $bid = [int]($this.currentPosition - 0.5)
+    }
+
+    
+
+
     save(){
+        Connect-Mdbc . chiaswap strategy
         get-mdbcdata @{_id=($this._id)} -Set $this
     }
 
 }
 
-#$strategy = New-ChiaSwapStrategy -name usdcbgrid -TokenY ([TokenFactory]::code('wUSDC.b')) -TokenX ([TokenFactory]::code('XCH')) -StartingPrice 14.51 -FeeCharged 0.3 -NumberOfRows 100 -PriceDelta 4.51 -MaxRiskInXCH 40
-$strategy = [ChiaStrategy]::new('usdcbgrid')
-$strategy
+#$sbx = New-ChiaSwapStrategy -name sbx -TokenY ([TokenFactory]::code('SBX')) -TokenX ([TokenFactory]::code('XCH')) -StartingPrice 22380 -FeeCharged 0.3 -NumberOfRows 50 -PriceDelta 8000 -MaxRiskInXCH 10
+$wusdcb = [ChiaStrategy]::new('myactive')
+$sbx = [ChiaStrategy]::new('sbx')
+
+
+#$strategy
+
+
+Function run-amm{
+    $strategies = [ChiaStrategy]::allActive()
+    $strategies | ForEach-Object {
+        $_.checkActiveOffers()
+    }
+}
