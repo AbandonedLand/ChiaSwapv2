@@ -219,9 +219,6 @@ function New-ChiaSwapStrategy{
 
 Class ChiaStrategy{
 
-    $strategyId
-    $strategy
-
     ChiaStrategy($strategyId){
         Connect-Mdbc . chiaswap strategy
         $properties =  get-mdbcdata @{_id=$strategyId}
@@ -235,11 +232,32 @@ Class ChiaStrategy{
 
     }
 
+
+    addActiveOfferbyDexieId($dexieId){
+        Connect-Mdbc . chiaswap strategy
+        try {
+            $uri = -join("https://dexie.space/v1/offers/",$dexieId)
+            $request = Invoke-RestMethod -Uri $uri -Method Get
+            if($request.offer){
+                $this.activeOffers.($request.offer.id) = $request.offer
+                $this.save()
+            }
+        } catch{
+            Write-Error "Failed to update"
+        }
+    }
+
+    [pscustomobject] checkDexieOffers([array]$ids){
+        $payload = @{'ids'=$ids}
+        return Invoke-RestMethod -Method Post -Body ($payload | ConvertTo-Json) -Uri "https://api.dexie.space/v1/offersBatch" -ContentType "Application/json"
+    }
+
     save(){
         get-mdbcdata @{_id=($this._id)} -Set $this
     }
 
-
 }
 
-$strategy = New-ChiaSwapStrategy -name usdcbgrid -TokenY ([TokenFactory]::code('wUSDC.b')) -TokenX ([TokenFactory]::code('XCH')) -StartingPrice 14.51 -FeeCharged 0.3 -NumberOfRows 100 -PriceDelta 4.51 -MaxRiskInXCH 40
+#$strategy = New-ChiaSwapStrategy -name usdcbgrid -TokenY ([TokenFactory]::code('wUSDC.b')) -TokenX ([TokenFactory]::code('XCH')) -StartingPrice 14.51 -FeeCharged 0.3 -NumberOfRows 100 -PriceDelta 4.51 -MaxRiskInXCH 40
+$strategy = [ChiaStrategy]::new('usdcbgrid')
+$strategy
