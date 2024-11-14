@@ -180,7 +180,7 @@ function Get-AllApiItems {
     return $allItems
 }
 
-$grid = New-GridTradingTable  -TokenX ([TokenFactory]::code("XCH")) -TokenY ([TokenFactory]::code("wUSDC.b")) -CurrentPrice 16 -FeeCharged 0.3 -PriceDelta 5 -NumberOfRows 100 -MaxRiskInXCH 40
+
 
 
 function New-ChiaSwapStrategy{
@@ -238,8 +238,14 @@ Class ChiaStrategy{
         get-mdbcdata @{_id=($this.strategyId)} -Set $this.strategy
     }
 
+    
+
 
 }
-
-$strategy = New-ChiaSwapStrategy -name usdcbgrid -TokenY ([TokenFactory]::code('wUSDC.b')) -StartingPrice 14.51 -FeeCharged 0.3 -NumberOfRows 100 -PriceDelta 4.51 -MaxRiskInXCH 40
+Import-Module mdbc
+Connect-Mdbc . chiaswap assets
+if(!(Get-MdbcData)){
+    Build-AssetCollection
+}
+$strategy = New-ChiaSwapStrategy -name usdcbgrid -TokenX ([TokenFactory]::code("XCH")) -TokenY ([TokenFactory]::code('wUSDC.b')) -StartingPrice 14.51 -FeeCharged 0.3 -NumberOfRows 100 -PriceDelta 4.51 -MaxRiskInXCH 40
 
