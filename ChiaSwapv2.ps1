@@ -181,8 +181,6 @@ function Get-AllApiItems {
 }
 
 
-
-
 function New-ChiaSwapStrategy{
     param(
         [string] $name,
@@ -226,8 +224,11 @@ Class ChiaStrategy{
 
     ChiaStrategy($strategyId){
         Connect-Mdbc . chiaswap strategy
-        $this.strategyId = $strategyId
-        $this.strategy = get-mdbcdata @{_id=$strategyId}
+        $properties =  get-mdbcdata @{_id=$strategyId}
+        foreach ($key in $properties.Keys) {
+            # Dynamically add each property from the hashtable to the instance
+            $this | Add-Member -MemberType NoteProperty -Name $key -Value $properties[$key]
+        }
     }
 
     createOfferForPosition($position,$side){
@@ -235,17 +236,10 @@ Class ChiaStrategy{
     }
 
     save(){
-        get-mdbcdata @{_id=($this.strategyId)} -Set $this.strategy
+        get-mdbcdata @{_id=($this._id)} -Set $this
     }
 
-    
-
 
 }
-Import-Module mdbc
-Connect-Mdbc . chiaswap assets
-if(!(Get-MdbcData)){
-    Build-AssetCollection
-}
-$strategy = New-ChiaSwapStrategy -name usdcbgrid -TokenX ([TokenFactory]::code("XCH")) -TokenY ([TokenFactory]::code('wUSDC.b')) -StartingPrice 14.51 -FeeCharged 0.3 -NumberOfRows 100 -PriceDelta 4.51 -MaxRiskInXCH 40
 
+$strategy = New-ChiaSwapStrategy -name usdcbgrid -TokenY ([TokenFactory]::code('wUSDC.b')) -TokenX ([TokenFactory]::code('XCH')) -StartingPrice 14.51 -FeeCharged 0.3 -NumberOfRows 100 -PriceDelta 4.51 -MaxRiskInXCH 40
