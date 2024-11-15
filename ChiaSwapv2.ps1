@@ -432,7 +432,7 @@ Class ChiaStrategy{
                 $TokenY = -($active.dexieResponse.offer.offered | Where-Object {$_.code -eq $this.TokenY.code}).amount
             }
             if($active.dexieResponse.offer.requested | Where-Object {$_.code -eq $this.TokenX.code}){
-                $TokenX = ($active.dexieResponse.offer.requested | Where-Object {$_.code -eq $this.TokenY.code}).amount
+                $TokenX = ($active.dexieResponse.offer.requested | Where-Object {$_.code -eq $this.TokenX.code}).amount
             }
             if($active.dexieResponse.offer.requested | Where-Object {$_.code -eq $this.TokenY.code}){
                 $TokenY = ($active.dexieResponse.offer.requested | Where-Object {$_.code -eq $this.TokenY.code}).amount
