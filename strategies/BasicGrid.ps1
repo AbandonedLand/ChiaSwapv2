@@ -225,6 +225,7 @@ Class BasicGridStrategy{
                 side = $side
                 dexieResponse = $dexieResponse
                 offer = $offer
+                createdAt = (Get-Date)
             }
             $this.save()
         }
@@ -355,13 +356,29 @@ Class BasicGridStrategy{
                 throw "TokenY not found"
             }
 
+            if($offer.rewards){
+                $rewards = $offer.rewards
+            } else {
+                $rewards = 0
+            }
 
-            $this.profitLoss += [ordered]@{
-                dexieId = $offer.id
+            $pl = [ordered]@{
+                _id = $offer.id
+                strategy = $this._id
+                rewards = $rewards
+                tokenYcode = $this.TokenY.code
                 tokenY = $TokenY
+                tokenXcode = $this.TokenX.code
                 tokenX = $TokenX
                 price = ($tokenY / -($TokenX))
             }
+
+            $this.profitLoss += $pl
+            
+
+            Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) profitLoss
+            $pl | Add-MdbcData
+
         }
         
         # Remove the offer data from active offers
@@ -391,6 +408,25 @@ Class BasicGridStrategy{
     }
 
     
+    [pscustomobject]checkDBXRewards(){
+         # Entry point to check offers and make changes if needed.
+         
+         $ids = @()
+         $this.activeOffers.GetEnumerator() | ForEach-Object {
+             $ids += $_.Key
+         }
+         $response = [pscustomobject]@{}
+         if($ids){
+             
+             $response = $this.getDexieBulkOfferStatus($ids)
+         
+        }
+        return $response.offers
+
+         
+         
+         
+    }
 
 
     save(){
