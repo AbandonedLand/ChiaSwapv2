@@ -140,6 +140,20 @@ Class BasicGridStrategy{
         
     }
 
+    cancelOffers(){
+        $trade_ids = @()
+        $this.activeOffers.getEnumerator().Value | ForEach-Object {$trade_ids += [string]($_.offer.trade_record.trade_id)}
+
+        $trade_ids | ForEach-Object {
+            $json = @{
+                trade_id = $_
+                fee = 0
+                secure=$true
+            } | convertto-json
+            chia rpc wallet cancel_offer $json
+        }
+        
+    }
 
     createOffersForCurrentPosition(){
         $bidPosition = [int]($this.currentPosition - 0.5)
