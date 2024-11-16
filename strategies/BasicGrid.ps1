@@ -371,6 +371,7 @@ Class BasicGridStrategy{
 
             $pl = [ordered]@{
                 _id = $offer.id
+                dexieId = $offer.id
                 strategy = $this._id
                 rewards = $rewards
                 tokenYcode = $this.TokenY.code
