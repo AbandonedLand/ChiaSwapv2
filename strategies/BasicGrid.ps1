@@ -271,7 +271,7 @@ Class BasicGridStrategy{
             $response = $this.getDexieBulkOfferStatus($ids)
             foreach($offer in $response.offers){
                 # Offer Taken
-                if($offer.status -eq 4){
+                if($offer.status -eq 4 -or $offer.status -eq 1){
                     $this.offerTaken($offer)
                     $this.save()
                     
