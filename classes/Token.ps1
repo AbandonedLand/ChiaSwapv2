@@ -54,14 +54,17 @@ Class Token{
         
     }
 
-    [pscustomobject]getTibetQuote(){
+    [pscustomobject]getTibetQuote($xch){
+        $amount = [int64]($xch*1000000000000)
         Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) tibet
 
         $pair_id = Get-MdbcData @{_id = $this.id}
-        $sell = -join("https://api.v2.tibetswap.io/quote/",$pair_id.pair_id,"?amount_in=1000000000000&xch_is_input=true&estimate_fee=false")
-        $buy = -join("https://api.v2.tibetswap.io/quote/",$pair_id.pair_id,"?amount_out=1000000000000&xch_is_input=false&estimate_fee=false")
+        $sell = -join("https://api.v2.tibetswap.io/quote/",$pair_id.pair_id,"?amount_in=",$amount,"&xch_is_input=true&estimate_fee=false")
+        $buy = -join("https://api.v2.tibetswap.io/quote/",$pair_id.pair_id,"?amount_out=",$amount,"&xch_is_input=false&estimate_fee=false")
         $toSell = Invoke-RestMethod $sell -Method Get -MaximumRetryCount 5 -RetryIntervalSec 2
+        $toSell | Add-Member -Name Price -MemberType NoteProperty -Value ([Math]::round((($toSell.amount_out/1000)/($toSell.amount_in/1000000000)),2))
         $toBuy = Invoke-RestMethod $buy -Method Get -MaximumRetryCount 5 -RetryIntervalSec 2
+        $toBuy | Add-Member -Name Price -MemberType NoteProperty -Value ([Math]::round((($toBuy.amount_in/1000)/($toBuy.amount_out/1000000000000)),2))
         return [pscustomobject]@{
             buy = $toBuy
             sell= $toSell

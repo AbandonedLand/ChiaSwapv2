@@ -19,4 +19,15 @@ Class Dexie{
         return Get-AllApiItems -baseUrl "https://dexie.space/v1/" -endPoint assets -pageSize 100
     }
     
+
+    static [pscustomobject] createOffer($json){
+        $json = $json | ConvertTo-Json
+
+        $offer = chia rpc wallet create_offer_for_ids $json | ConvertFrom-Json
+        if(!($offer)){
+            throw "Offer failed to create"
+        }
+        return $offer
+    }
+
 }

@@ -164,14 +164,22 @@ Class BasicGridStrategy{
         $bidPosition = [int]($this.currentPosition - 0.5)
         $askPosition = [int]($this.currentPosition + 0.5)
         ($bidPosition - ($n-1))..$bidPosition | ForEach-Object {
-            $this.createOfferForPosition($_,"Bid")
-            #Write-Information "Creating Bid at position $_"
-            start-sleep 2
+            $check = $this.activeOffers.getEnumerator() | ForEach-Object {$_.Value | Where-Object {$_.position -eq $_ -and $_.side -eq "Bid"}}
+            if(!$check){
+                $this.createOfferForPosition($_,"Bid")
+                Write-Information "Creating Bid at position $_"
+                #start-sleep 2
+            }
+            
         }
         $askPosition..($askPosition + ($n-1)) | ForEach-Object {
-            #Write-Information "Creating Ask at position $_"
-            $this.createOfferForPosition($_,"Ask")
-            start-sleep 2
+            $check = $this.activeOffers.getEnumerator() | ForEach-Object {$_.Value | Where-Object {$_.position -eq $_ -and $_.side -eq "Ask"}}
+            if(!$check){
+                Write-Information "Creating Ask at position $_"
+                $this.createOfferForPosition($_,"Ask")
+                #start-sleep 2
+            }
+            
         }
     }
 
@@ -189,26 +197,31 @@ Class BasicGridStrategy{
             $check = $this.activeOffers.getEnumerator() | ForEach-Object {$_.Value | Where-Object {$_.position -eq $position -and $_.side -eq $side}}
 
             if(!$check){
-                $json = @{
-                    offer = ($this.TradeTable[$position].$side.offer)
-                    fee=([Config]::config.offer.fee)
-                    reuse_puzhash = ([Config]::config.offer.reuse_puzhash)
-                    
-                } | ConvertTo-Json
                 
                 
-                $offer = $this.makeOffer($json)
-                if($offer){
-                    $dexieResponse = $this.postOfferToDexie($offer)
-                    if($dexieResponse){
-                        $this.addActiveOffer($dexieResponse,$offer,$position,$side)
-                    } else {
-                        throw "Dexie did not process offer"
+                
+                    $json = @{
+                        offer = ($this.TradeTable[$position].$side.offer)
+                        fee=([Config]::config.offer.fee)
+                        reuse_puzhash = ([Config]::config.offer.reuse_puzhash)
                     }
-        
-                } else {
-                    throw "Failed to create offer."
-                }
+
+                    $offer = [Dexie]::createOffer($json)
+                    if($offer){
+                        $dexieResponse = $this.postOfferToDexie($offer)
+                        if($dexieResponse){
+                            $this.addActiveOffer($dexieResponse,$offer,$position,$side)
+                        } else {
+                            throw "Dexie did not process offer"
+                        }
+            
+                    } else {
+                        throw "Failed to create offer."
+                    }
+                
+                
+                #$offer = $this.makeOffer($json)
+                
             } else {
                 $message = -join("Offer exists for Position: ",$position," Side: ",$side)
                 Write-Information $message
@@ -232,13 +245,7 @@ Class BasicGridStrategy{
         
     }
 
-    [pscustomobject]makeOffer($json){
-        $offer = chia rpc wallet create_offer_for_ids $json | ConvertFrom-Json
-        if(!($offer)){
-            throw "Offer failed to create"
-        }
-        return $offer
-    }
+    
 
     [pscustomobject]postOfferToDexie($offer){
         $payload = @{
@@ -385,7 +392,7 @@ Class BasicGridStrategy{
         $this.activeOffers.remove($offer.id)
 
         # Create next set of offers.
-        $this.createOffersForCurrentPosition()
+        #$this.createOffersForCurrentPosition()
 
     }
 

@@ -10,8 +10,25 @@
 
 
 Function run-amm{
-    $strategies = [ChiaStrategy]::allActive()
-    $strategies | ForEach-Object {
-        $_.checkActiveOffers()
+    [CmdletBinding()]
+    PARAM()
+    process{
+        
+        $strategies = [BasicGridStrategy]::allActive()
+        $strategies | ForEach-Object {
+            Write-Host ""
+            Write-Host "---------------------------"
+            $message = -join("Checking Offers for strategy: ", $_._id)
+            Write-Host $message
+            Write-Host "---------------------------"
+            $message = -join("Current position is:", $_.currentPosition)
+            Write-Host $message
+            $_.checkActiveOffers()
+            Write-Host "---------------------------"
+            Write-Host "Attempting to create offers"
+            Write-Host "---------------------------"
+            $_.createNOffersfromCurrentPosition($_.maxOffersFromPosition)
+            Write-Host "Done.  (sleep 2min)"
+        } 
     }
 }
