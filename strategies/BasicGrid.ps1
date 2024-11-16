@@ -393,7 +393,7 @@ Class BasicGridStrategy{
         $this.activeOffers.remove($offer.id)
 
         # Create next set of offers.
-        #$this.createOffersForCurrentPosition()
+        $this.createOffersForCurrentPosition()
 
     }
 

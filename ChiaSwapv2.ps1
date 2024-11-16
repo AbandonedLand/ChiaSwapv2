@@ -13,22 +13,32 @@ Function run-amm{
     [CmdletBinding()]
     PARAM()
     process{
-        
-        $strategies = [BasicGridStrategy]::allActive()
-        $strategies | ForEach-Object {
-            Write-Host ""
-            Write-Host "---------------------------"
-            $message = -join("Checking Offers for strategy: ", $_._id)
-            Write-Host $message
-            Write-Host "---------------------------"
-            $message = -join("Current position is:", $_.currentPosition)
-            Write-Host $message
-            $_.checkActiveOffers()
-            Write-Host "---------------------------"
-            Write-Host "Attempting to create offers"
-            Write-Host "---------------------------"
-            $_.createNOffersfromCurrentPosition($_.maxOffersFromPosition)
+        $loop = 1
+        while($true){
+            $strategies = [BasicGridStrategy]::allActive()
+            $strategies | ForEach-Object {
+                
+                Write-Host "Loop = $loop"
+                Write-Host "---------------------------"
+                $message = -join("Checking Offers for strategy: ", $_._id)
+                Write-Host $message
+                Write-Host "---------------------------"
+                $message = -join("Current position is:", $_.currentPosition)
+                Write-Host $message
+                $_.checkActiveOffers()
+                
+                if(($loop % 5) -eq 0){
+                Write-Host "---------------------------"
+                Write-Host "Attempting to create bulk offers"
+                Write-Host "---------------------------"
+                    $_.createNOffersfromCurrentPosition($_.maxOffersFromPosition)
+                }
+                
+                
+            }
+            $loop ++
             Write-Host "Done.  (sleep 2min)"
+            start-sleep 120
         } 
     }
 }
