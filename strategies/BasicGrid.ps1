@@ -193,30 +193,18 @@ Class BasicGridStrategy{
         return $strategies
     }
 
-    <#
-    createNOffersfromCurrentPosition([int]$n){
-        $bidPosition = [int]($this.currentPosition - 0.5)
-        $askPosition = [int]($this.currentPosition + 0.5)
-        ($bidPosition - ($n-1))..$bidPosition | ForEach-Object {
-            $check = $this.activeOffers.getEnumerator() | ForEach-Object {$_.Value | Where-Object {$_.position -eq $_ -and $_.side -eq "Bid"}}
-            if(!$check){
-                $this.createOfferForPosition($_,"Bid")
-                Write-Information "Creating Bid at position $_"
-                #start-sleep 2
-            }
-            
+    
+    createOffersFromPosition([int]$n){
+        $bids = ($n - $this.maxOffersFromPosition)..$n
+        $asks = $n .. ($n + $this.maxOffersFromPosition)
+        $bids | ForEach-Object {
+            $this.createOfferForPosition($_,"Bid")
         }
-        $askPosition..($askPosition + ($n-1)) | ForEach-Object {
-            $check = $this.activeOffers.getEnumerator() | ForEach-Object {$_.Value | Where-Object {$_.position -eq $_ -and $_.side -eq "Ask"}}
-            if(!$check){
-                Write-Information "Creating Ask at position $_"
-                $this.createOfferForPosition($_,"Ask")
-                #start-sleep 2
-            }
-            
+        $asks | ForEach-Object {
+            $this.createOfferForPosition($_,"Ask")
         }
     }
-    #>
+    
 
 
     log($message){
@@ -399,19 +387,67 @@ Class BasicGridStrategy{
             'reward'=$offer.reward.amount
         }
         if($active.side -eq "Ask"){
-            # Create offers on the bid side upto the maxOffersforPosition
-            ($this.maxOffersFromPosition)..$active.position | ForEach-Object {
-                $this.createOfferForPosition($_,"Bid")
+
+            # Get prevous trade tables
+            $bidStart = [Math]::max(($active.position - $this.maxOffersFromPosition),$this.minPosition)
+            $bidStop = [Math]::min($active.position,$this.maxPosition)
+            # Create offers on the bid side upto the maxOffersfromPosition
+            if($bidStart -le $bidStop){
+                $bidStart .. $bidStop | ForEach-Object {
+                    $this.createOfferForPosition($_,"Bid")
+                }
             }
+            
+            
+            # Check if this was the End of the tradetable
+            if($active.position -lt $this.maxPosition){
+                
+                # Start can be the max, but cannot be 
+                $askStart = [math]::max(($active.position + 1),$this.maxPosition)
+                $askStop = [Math]::min(($active.position + $this.maxOffersFromPosition),$this.maxPosition)
+                
+                # Make sure the array created is at least 1 item and 
+                if($askStop -ge $askstart){
+                    $askStart .. $askStop | ForEach-Object {
+                        $this.createOfferForPosition($_,"Ask")
+                    }
+                } 
+            }
+            
+            
             
         }
 
         if($active.side -eq "Bid"){
-            # Create offers on the Ask side upto the MaxOffersForPosition
-            $active.position .. ($active.position + $this.maxOffersFromPosition) | ForEach-Object {
-                $this.createOfferForPosition($_,"Ask")
+            # The current bit must not have been the 0 position.  If it is, then no new offers are created.
+            if($active.position -gt 0){
+                $bidStart = [Math]::max((($active.position-1) - $this.maxOffersFromPosition),$this.minPosition)
+                $bidStop = ($active.position-1)
+                # Create offers on the bid side upto the maxOffersFromPosition
+
+                
+                if($bidStart -le $bidStop -and $bidStart -le $this.maxPosition){
+                    $bidStart .. $bidStop | ForEach-Object {
+                        $this.createOfferForPosition($_,"Bid")
+                    }
+                }
             }
-            #$this.currentPosition = $this.currentPosition - 1
+            
+            # Check if this was the End of the tradetable
+            if($active.position -le $this.maxPosition){
+                
+                # Start can be the max, but cannot be 
+                $askStart = [math]::max(($active.position),$this.maxPosition)
+                $askStop = [Math]::max(($active.position + $this.maxOffersFromPosition),$this.maxPosition)
+                
+                # Make sure the array created is at least 1 item and 
+                if($askStop -ge $askstart){
+                    $askStart .. $askStop | ForEach-Object {
+                        $this.createOfferForPosition($_,"Ask")
+                    }
+                } 
+            }
+            
         }
 
         if(!($this.profitLoss | Where-Object {$_.dexieId -eq $offer.id})){
@@ -487,7 +523,7 @@ Class BasicGridStrategy{
     [pscustomobject]checkDBXRewards(){
          # Entry point to check offers and make changes if needed.
         $response = [Dexie]::getStrategyActiveOfferStatus($this)
-        return $response.offers
+        return $response
 
          
          
