@@ -90,6 +90,8 @@ function New-GridTradingTable {
 }
 
 
+
+
 Class BasicGridStrategy{
 
     BasicGridStrategy($id){
@@ -113,6 +115,7 @@ Class BasicGridStrategy{
         [int]$NumberOfRows  = Read-Host "Enter NumberOfRows"
         [decimal]$MaxRiskInXCH  = Read-Host "MaxRiskinXch"
         [decimal]$PriceDelta  = Read-Host "Enter Price Delta"
+        [int]$maxOffersFromPosition = Read-Host "Max offers on either side of position."
         [ordered]@{
             _id = $name
             Type="BasicGrid"
@@ -134,10 +137,24 @@ Class BasicGridStrategy{
             profitLoss=@()
             completedOffers = @{}
             createdAt = (get-date)
+            maxOffersFromPosition=$maxOffersFromPosition
+            
         } | Add-MdbcData -ErrorAction Ignore
     
         return [BasicGridStrategy]::new($name)
         
+    }
+
+    deactive(){
+        $this.isActive = $false
+        $this.log("Making Strategy Inactive")
+        $this.save()
+    }
+    
+    activate(){
+        $this.isActive = $true
+        $this.log("Making Strategy Active")
+        $this.save()
     }
 
     cancelOffers(){
@@ -150,11 +167,13 @@ Class BasicGridStrategy{
                 fee = 0
                 secure=$true
             } | convertto-json
+            $this.log("Canceling offer with trade_id $_")
             chia rpc wallet cancel_offer $json
         }
         
     }
 
+    <#
     createOffersForCurrentPosition(){
         $bidPosition = [int]($this.currentPosition - 0.5)
         $askPosition = [int]($this.currentPosition + 0.5)
@@ -162,7 +181,7 @@ Class BasicGridStrategy{
         $this.createOfferForPosition($bidPosition,"Bid")
         $this.createOfferForPosition($askPosition,"Ask")
     }
-
+    #>
     
 
     static [array] allActive(){
@@ -174,6 +193,7 @@ Class BasicGridStrategy{
         return $strategies
     }
 
+    <#
     createNOffersfromCurrentPosition([int]$n){
         $bidPosition = [int]($this.currentPosition - 0.5)
         $askPosition = [int]($this.currentPosition + 0.5)
@@ -196,6 +216,17 @@ Class BasicGridStrategy{
             
         }
     }
+    #>
+
+
+    log($message){
+        Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) log
+        @{
+            time = (Get-Date)
+            strategy = ($this._id)
+            message = $message
+        } | Add-MdbcData
+    }
 
     createOfferForPosition([int]$position,[string]$side){
         if($side -notin "bid", "ask"){
@@ -211,17 +242,25 @@ Class BasicGridStrategy{
             $check = $this.activeOffers.getEnumerator() | ForEach-Object {$_.Value | Where-Object {$_.position -eq $position -and $_.side -eq $side}}
 
             if(!$check){
-                
-                
-                
+
                     $json = @{
                         offer = ($this.TradeTable[$position].$side.offer)
                         fee=([Config]::config.offer.fee)
                         reuse_puzhash = ([Config]::config.offer.reuse_puzhash)
                     }
 
+                    # logging data
+                    $this.log(@{
+                        message="Attempting to create offer"
+                        data=$json
+                    })
+
                     $offer = [Dexie]::createOffer($json)
                     if($offer){
+                        $this.log(@{
+                            message="Offer Created"
+                            data=$offer
+                        })
                         $dexieResponse = $this.postOfferToDexie($offer)
                         if($dexieResponse){
                             $this.addActiveOffer($dexieResponse,$offer,$position,$side)
@@ -237,8 +276,11 @@ Class BasicGridStrategy{
                 #$offer = $this.makeOffer($json)
                 
             } else {
-                $message = -join("Offer exists for Position: ",$position," Side: ",$side)
-                Write-Information $message
+                $this.log(
+                    @{
+                        message = (-join("Offer exists for Position: ",$position," Side: ",$side))
+                    }
+                )
             }
         }
         
@@ -266,24 +308,34 @@ Class BasicGridStrategy{
             offer = $offer.offer
             claim_rewards = ([Config]::config.offer.claim_rewards)
         } | ConvertTo-Json
+        $this.log(@{
+            message="Attempting to post to dexie"
+            data=$payload
+        })
         $response = Invoke-RestMethod -Uri 'https://api.dexie.space/v1/offers' -Method Post -Body $payload -ContentType "application/json" -RetryIntervalSec 5 -MaximumRetryCount 2 
         if(!($response)){
+            $this.log(@{
+                message="Failed to post to dexie"
+                data=@{}
+            })
             throw "Error posting offer to dexie"
         }
+        
+        $this.log(@{
+            message="Posting to dexie successful"
+            data=$response
+        })
         return $response
     }
 
 
     checkActiveOffers(){
         # Entry point to check offers and make changes if needed.
-        $ids = @()
-        $this.activeOffers.GetEnumerator() | ForEach-Object {
-            $ids += $_.Key
-        }
-        if($ids){
+        $response = [Dexie]::getStrategyActiveOfferStatus($this)
+        if($response){
             
-            $response = $this.getDexieBulkOfferStatus($ids)
-            foreach($offer in $response.offers){
+            
+            foreach($offer in $response){
                 # Offer Taken
                 if($offer.status -eq 4 -or $offer.status -eq 1){
                     $this.offerTaken($offer)
@@ -291,7 +343,7 @@ Class BasicGridStrategy{
                     
                 }
                 # Offer canceled or expired
-                if($offer.status -eq 3 -OR $offer.status -eq 6){
+                if($offer.status -eq 3 -or $offer.status -eq 6){
                     $this.offerNotActive($offer)
                     $this.save()
                 }
@@ -344,13 +396,22 @@ Class BasicGridStrategy{
             'date_found' = $offer.date_found
             'date_completed' = $offer.date_completed
             'trade_id' = $offer.trade_id
+            'reward'=$offer.reward.amount
         }
         if($active.side -eq "Ask"){
-            $this.currentPosition = $this.currentPosition + 1
+            # Create offers on the bid side upto the maxOffersforPosition
+            ($this.maxOffersFromPosition)..$active.position | ForEach-Object {
+                $this.createOfferForPosition($_,"Bid")
+            }
+            
         }
 
         if($active.side -eq "Bid"){
-            $this.currentPosition = $this.currentPosition - 1
+            # Create offers on the Ask side upto the MaxOffersForPosition
+            $active.position .. ($active.position + $this.maxOffersFromPosition) | ForEach-Object {
+                $this.createOfferForPosition($_,"Ask")
+            }
+            #$this.currentPosition = $this.currentPosition - 1
         }
 
         if(!($this.profitLoss | Where-Object {$_.dexieId -eq $offer.id})){
@@ -378,7 +439,7 @@ Class BasicGridStrategy{
             }
 
             if($offer.rewards){
-                $rewards = $offer.rewards
+                $rewards = $offer.rewards.amount
             } else {
                 $rewards = 0
             }
@@ -402,24 +463,17 @@ Class BasicGridStrategy{
             $pl | Add-MdbcData
 
         }
-        
+        $possition = $this.activeOffers.($offer.id).position
+
         # Remove the offer data from active offers
         $this.activeOffers.remove($offer.id)
 
-        # Create next set of offers.
-        $this.createOffersForCurrentPosition()
+
+        
+        
 
     }
 
-    
-    
-
-
-
-    [pscustomobject] getDexieBulkOfferStatus([array]$ids){
-        $payload = @{'ids'=$ids}
-        return Invoke-RestMethod -Method Post -Body ($payload | ConvertTo-Json) -Uri "https://api.dexie.space/v1/offersBatch" -ContentType "Application/json"
-    }
 
     initiateStrategy(){
         
@@ -432,17 +486,7 @@ Class BasicGridStrategy{
     
     [pscustomobject]checkDBXRewards(){
          # Entry point to check offers and make changes if needed.
-         
-         $ids = @()
-         $this.activeOffers.GetEnumerator() | ForEach-Object {
-             $ids += $_.Key
-         }
-         $response = [pscustomobject]@{}
-         if($ids){
-             
-             $response = $this.getDexieBulkOfferStatus($ids)
-         
-        }
+        $response = [Dexie]::getStrategyActiveOfferStatus($this)
         return $response.offers
 
          

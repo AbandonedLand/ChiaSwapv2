@@ -30,4 +30,27 @@ Class Dexie{
         return $offer
     }
 
+    static [pscustomobject] takeOffer($dexieId){
+        $uri = -join("https://dexie.space/v1/offers/",$dexieId)
+        $response = Invoke-RestMethod -Uri $uri -Method Get -MaximumRetryCount 1 -RetryIntervalSec 2
+        if(!($response)){
+            throw "Could not get offer data"
+        }
+        $json = @{
+            offer = ($response.offer.offer)
+        } | ConvertTo-Json
+        $chiaresponse = chia rpc wallet take_offer $json | ConvertFrom-Json
+        return $chiaresponse
+    }
+
+
+    static [PSCustomObject] getStrategyActiveOfferStatus($strategy){
+        $ids = @()
+        $strategy.activeOffers.GetEnumerator() | ForEach-Object {
+            $ids += $_.Key
+        }
+        $payload = @{'ids'=$ids}
+        $results = Invoke-RestMethod -Method Post -Body ($payload | ConvertTo-Json) -Uri "https://api.dexie.space/v1/offersBatch" -ContentType "Application/json"
+        return $results.offers | Sort-Object {$_.date_found} -Descending
+    }
 }

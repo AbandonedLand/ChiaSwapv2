@@ -5,6 +5,7 @@
 . .\functions\ApiHelper.ps1
 . .\strategies\BasicGrid.ps1
 . .\classes\Token.ps1
+. .\classes\Wallet.ps1
 
 
 

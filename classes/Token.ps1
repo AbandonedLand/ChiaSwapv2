@@ -1,4 +1,3 @@
-
 Class Token{
     [string]$id
     [string]$code
@@ -9,7 +8,7 @@ Class Token{
         Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) assets
         $db = Get-MdbcData @{codeLower=([string]$code.toLower())}
         if(!$db){
-            Throw "Entry not found in database"
+            Throw "Could not find token.  [Token]::new(code)"
         }
         $this.id = $db._id
         $this.code = $code
@@ -35,6 +34,7 @@ Class Token{
             "id" = "1"
             'code'='XCH'
             'name'='XCH'
+            'codeLower'='xch'
             'decimalPlaces'=1000000000000
         } 
         $date = Get-Date
