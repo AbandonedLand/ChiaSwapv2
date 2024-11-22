@@ -1,4 +1,8 @@
-. .\classes\Config.ps1
+using module .\Config.psm1
+using module .\Token.psm1
+using module .\Strategy.psm1
+using module .\Dexie.psm1
+
 
 function New-GridTradingTable {
     param (
@@ -92,7 +96,7 @@ function New-GridTradingTable {
 
 
 
-Class BasicGridStrategy{
+Class BasicGridStrategy : Strategy{
 
     BasicGridStrategy($id){
         Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) strategy
@@ -103,27 +107,31 @@ Class BasicGridStrategy{
         }
     }
 
+
     static [BasicGridStrategy] build(){
         Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) strategy
         $name = (New-Guid).Guid
-        $TokenYcode = Read-Host "Enter Token Y Code"
-        $TokenY = [TokenFactory]::code($TokenYcode)
-        $TokenXcode = Read-Host "Enter Token X Code"
-        $TokenX = ([TokenFactory]::code($TokenXcode))
-        [decimal]$StartingPrice = Read-Host "Enter starting price"
-        [decimal]$FeeCharged = Read-Host "Enter FeeCharged"
-        [int]$NumberOfRows  = Read-Host "Enter NumberOfRows"
-        [decimal]$MaxRiskInXCH  = Read-Host "MaxRiskinXch"
-        [decimal]$PriceDelta  = Read-Host "Enter Price Delta"
-        [int]$maxOffersFromPosition = Read-Host "Max offers on either side of position."
-        [ordered]@{
+        $TokenY = ([Token]::selectBasicY())
+        
+        $TokenX = ([Token]::selectBasicX())
+        $defaultPrice = ([Token]::code($TokenY.code)).getTibetMedianPrice()
+        [decimal]$StartingPrice = Read-SpectreText -Message "Enter your starting price?" -DefaultAnswer ($defaultPrice)
+        [decimal]$PriceDelta  = Read-SpectreText -Message "(PriceDelta) How much would you like to trade on either side of the starting price in terms of price?"
+        [decimal]$FeeCharged = Read-SpectreText -Message "What would you like your spread to be between buy and sell offers in percent terms." -DefaultAnswer 0.3
+        [int]$NumberOfRows  = Read-SpectreText -Message "How many steps should be in this grid?" -DefaultAnswer 100
+        [decimal]$startingXCH  = Read-SpectreText -Message "(Starting XCH)How much XCH will you commit to this strategy?"
+        [decimal]$MaxRiskInXCH = $startingXCH *2
+        
+        [int]$maxOffersFromPosition = Read-SpectreText "How many offers to create on each side of trade at a time?" -DefaultAnswer 5
+        Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) strategy
+        @{
             _id = $name
             Type="BasicGrid"
             MinPrice = ($StartingPrice - $PriceDelta)
             MaxPrice = ($StartingPrice + $PriceDelta)
             InitialPrice = $StartingPrice
-            TokenY = $TokenY
-            TokenX = $TokenX
+            TokenY = ([pscustomobject]$TokenY)
+            TokenX = ([pscustomobject]$TokenX)
             FeeCharged = $FeeCharged
             MaxRiskInXCH = $MaxRiskInXCH
             InitialTokenX = [math]::round(($MaxRiskInXCH/2),12)
@@ -139,59 +147,15 @@ Class BasicGridStrategy{
             createdAt = (get-date)
             maxOffersFromPosition=$maxOffersFromPosition
             
-        } | Add-MdbcData -ErrorAction Ignore
-    
+        } | Add-MdbcData 
+        
         return [BasicGridStrategy]::new($name)
-        
+
     }
 
-    deactive(){
-        $this.isActive = $false
-        $this.log("Making Strategy Inactive")
-        $this.save()
-    }
-    
-    activate(){
-        $this.isActive = $true
-        $this.log("Making Strategy Active")
-        $this.save()
-    }
-
-    cancelOffers(){
-        $trade_ids = @()
-        $this.activeOffers.getEnumerator().Value | ForEach-Object {$trade_ids += [string]($_.offer.trade_record.trade_id)}
-
-        $trade_ids | ForEach-Object {
-            $json = @{
-                trade_id = $_
-                fee = 0
-                secure=$true
-            } | convertto-json
-            $this.log("Canceling offer with trade_id $_")
-            chia rpc wallet cancel_offer $json
-        }
-        
-    }
-
-    <#
-    createOffersForCurrentPosition(){
-        $bidPosition = [int]($this.currentPosition - 0.5)
-        $askPosition = [int]($this.currentPosition + 0.5)
-
-        $this.createOfferForPosition($bidPosition,"Bid")
-        $this.createOfferForPosition($askPosition,"Ask")
-    }
-    #>
     
 
-    static [array] allActive(){
-        $strategies = @()
-        Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) strategy
-        foreach($strat in (Get-MdbcData @{isActive=$true})){
-            $strategies += [BasicGridStrategy]::new($strat._id)
-        }
-        return $strategies
-    }
+    
 
     
     createOffersFromPosition([int]$n){
@@ -325,7 +289,7 @@ Class BasicGridStrategy{
             
             foreach($offer in $response){
                 # Offer Taken
-                if($offer.status -eq 4 -or $offer.status -eq 1){
+                if($offer.status -eq 4){
                     $this.offerTaken($offer)
                     $this.save()
                     
@@ -355,8 +319,34 @@ Class BasicGridStrategy{
         }
         if(!$this.activeOffers.($offer.id)){
             throw "No Active Offer found"
-        }
+        } 
+        $this.addProfitLoss($offer)
+
         $this.activeOffers.remove($offer.id)
+    }
+
+    [int]highestbid(){
+        $bid = $this.minPosition
+        foreach($offer in $this.ActiveOffers.getEnumerator().Value){
+            if($offer.side -eq "Bid" -and $offer.position -ge $bid){
+                $bid = $offer.position
+            }
+
+        }
+
+        return $bid
+    }
+    
+    [int]lowestask(){
+        $ask = $this.maxPosition
+        foreach($offer in $this.ActiveOffers.getEnumerator().Value){
+            if($offer.side -eq "Ask" -and $offer.position -le $ask){
+                $ask = $offer.position
+            }
+
+        }
+
+        return $ask
     }
 
     offerTaken($offer){
@@ -384,7 +374,7 @@ Class BasicGridStrategy{
             'date_found' = $offer.date_found
             'date_completed' = $offer.date_completed
             'trade_id' = $offer.trade_id
-            'reward'=$offer.reward.amount
+            'reward'=$offer.rewards.amount
         }
         if($active.side -eq "Ask"){
 
@@ -403,7 +393,7 @@ Class BasicGridStrategy{
             if($active.position -lt $this.maxPosition){
                 
                 # Start can be the max, but cannot be 
-                $askStart = [math]::max(($active.position + 1),$this.maxPosition)
+                $askStart = [math]::min(($active.position + 1),$this.maxPosition)
                 $askStop = [Math]::min(($active.position + $this.maxOffersFromPosition),$this.maxPosition)
                 
                 # Make sure the array created is at least 1 item and 
@@ -437,8 +427,9 @@ Class BasicGridStrategy{
             if($active.position -le $this.maxPosition){
                 
                 # Start can be the max, but cannot be 
-                $askStart = [math]::max(($active.position),$this.maxPosition)
-                $askStop = [Math]::max(($active.position + $this.maxOffersFromPosition),$this.maxPosition)
+                $askStart = [math]::min(($active.position),$this.maxPosition)
+
+                $askStop = [Math]::min(($active.position + $this.maxOffersFromPosition),$this.maxPosition)
                 
                 # Make sure the array created is at least 1 item and 
                 if($askStop -ge $askstart){
@@ -449,6 +440,22 @@ Class BasicGridStrategy{
             }
             
         }
+
+        $this.addProfitLoss($offer)
+
+        
+
+        # Remove the offer data from active offers
+        $this.activeOffers.remove($offer.id)
+
+
+        
+        
+
+    }
+
+    addProfitLoss($offer){
+        $active = $this.activeOffers.($offer.id)
 
         if(!($this.profitLoss | Where-Object {$_.dexieId -eq $offer.id})){
 
@@ -482,6 +489,7 @@ Class BasicGridStrategy{
 
             $pl = [ordered]@{
                 _id = $offer.id
+                status = $offer.status
                 dexieId = $offer.id
                 strategy = $this._id
                 rewards = $rewards
@@ -499,15 +507,6 @@ Class BasicGridStrategy{
             $pl | Add-MdbcData
 
         }
-        $possition = $this.activeOffers.($offer.id).position
-
-        # Remove the offer data from active offers
-        $this.activeOffers.remove($offer.id)
-
-
-        
-        
-
     }
 
 

@@ -1,3 +1,5 @@
+using module ./Config.psm1
+
 Class TokenFactory{
 
     static [pscustomobject] code($code){

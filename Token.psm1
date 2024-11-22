@@ -1,3 +1,7 @@
+using module .\Config.psm1
+using module .\Dexie.psm1
+using module .\TokenFactory.psm1
+
 Class Token{
     [string]$id
     [string]$code
@@ -19,10 +23,57 @@ Class Token{
     static [Token] code($code){
         return [Token]::new($code)
     }
+
+    static [string[]] incentivizedTokens(){
+        return @(
+            'DBX'
+            'HOA'
+            'SBX'
+            'wUSDC'
+            'wUSDC.b'
+            'more'    
+        )
+    }
+
+    static [pscustomobject] selectBasicY(){
+        $selection = Read-SpectreSelection -Message "Which token do you wish to trade?" -Choices ([Token]::incentivizedTokens()) -PageSize (([Token]::incentivizedTokens()).Count)
+        $token = $null
+        switch ($selection) {
+            more { $token = [Token]::selectAdvancedY() }
+            Default { $token = [TokenFactory]::code($selection)}
+        }
+        return $token
+    }
+
+    static [pscustomobject] selectAdvancedY(){
+        $response = Read-SpectreText -Message "Enter the code for the Token"
+        return [TokenFactory]::code($response)
+    }
+
+    static [pscustomobject] selectBasicX(){
+        Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) assets
+        $selection = Read-SpectreSelection -Message "Which token do you wish to trade?" -Choices @('XCH','other')
+        $token = $null
+        switch ($selection) {
+            more { $token = [Token]::selectAdvancedY() }
+            Default { $token = [TokenFactory]::code($selection)}
+        }
+        return $token
+    }
+
+
+    [decimal] getTibetMedianPrice(){
+        # Get quote from tibet
+        $prices = $this.getTibetQuote(1)
+
+        $avgPrive = ((($prices.buy.amount_in + $prices.sell.amount_out)/2)/$this.decimalPlaces)
+
+        return [Math]::round($avgPrive,3)
+    }
   
-    [array]incentives(){
-        $incentives = [Dexie]::GetIncentive($this.code)
-        return $incentives
+    [pscustomobject]incentives(){
+
+        return [Dexie]::GetIncentive($this.code)
     }
 
     # Sync the local database with Dexie's CAT2 token list

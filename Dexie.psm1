@@ -8,10 +8,14 @@ Class Dexie{
         
     }
 
-    static [array] GetIncentive($code){
+    static [pscustomobject] GetIncentive($code){
         $incentives = [Dexie]::GetIncentives()
-
-        return $incentives.incentives | Where-Object {$_.offered.code -eq $code -or $_.requested.code -eq $code}
+        $results = [pscustomobject]@{
+            Bid = $incentives.incentives | Where-Object {$_.offered.code -eq $code}
+            Ask = $incentives.incentives | Where-Object {$_.requested.code -eq $code}
+        }
+        $results.Bid | Add-Member -MemberType NoteProperty -Name p -Value ($results.Bid.marketPrice /1)
+        return $results
     
     }
 
