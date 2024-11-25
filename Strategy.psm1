@@ -12,7 +12,7 @@ Class Strategy {
         Connect-Mdbc ([Config]::config.database.connection_string) ([Config]::config.database.database_name) strategy
         $properties =  get-mdbcdata @{_id=$id}
         foreach ($key in $properties.Keys) {
-            # Dynamically add each property from the hashtable to the instance
+            # Dynamically add each property from the hashtable to the class instance
             $this | Add-Member -MemberType NoteProperty -Name $key -Value $properties[$key]
         }
     }

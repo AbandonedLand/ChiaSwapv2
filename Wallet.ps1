@@ -1,3 +1,4 @@
+using module .\Token.psm1
 Class Wallet{
 
     static [pscustomobject] getWalletIdForToken([Token] $token){
