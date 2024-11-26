@@ -3,6 +3,7 @@ using module .\Strategy.psm1
 using module .\BasicGrid.psm1
 using module .\Dexie.psm1
 using module .\Token.psm1
+using module .\StrategyBuilder.psm1
 . .\Tibet.ps1
 
 
