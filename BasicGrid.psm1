@@ -290,6 +290,8 @@ Class BasicGridStrategy : Strategy{
             foreach($offer in $response){
                 # Offer Taken
                 if($offer.status -eq 4){
+                    # $this.markComplete($offer)
+                    # $this.makeNextOffers($offer)
                     $this.offerTaken($offer)
                     $this.save()
                     
