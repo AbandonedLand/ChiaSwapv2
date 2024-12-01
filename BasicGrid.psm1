@@ -5,16 +5,25 @@ using module .\Dexie.psm1
 
 
 function New-GridTradingTable {
+    <#
+        TODO
+        change up the maxriskinxch to max token x per trade
+        then add a y variant
+    
+    
+    #>
     param (
         [decimal]$CurrentPrice,
         [decimal]$PriceDelta,
         [int]$NumberOfRows,
         [decimal]$FeeCharged,
-        [decimal]$MaxRiskInXCH,
+        [decimal]$MaxXTokenPerTrade,
+        [decimal]$MaxYTokenPerTrade,
         $tokenX,
         $tokenY
     )
 
+    
     $MaxPrice = $CurrentPrice + $PriceDelta
     $MinPrice = $CurrentPrice - $PriceDelta
 
@@ -22,7 +31,8 @@ function New-GridTradingTable {
     $priceStep = ($MaxPrice - $MinPrice) / ($NumberOfRows - 1)
     $spreadFactor = $FeeCharged / 100
     
-    $tokenXPerTrade = [Math]::Round(($MaxRiskInXCH/$NumberOfRows),3)
+    
+    
     # Initialize an array to hold grid rows
     $gridRows = @()
     
@@ -48,18 +58,29 @@ function New-GridTradingTable {
             $nextAskPosition = 'Stop'
         }
 
+        if($MaxXTokenPerTrade -gt 0){
+            $XBid = ([int64]($MaxXTokenPerTrade*$tokenX.decimalPlaces))
+            $XAsk = ([int64]($MaxXTokenPerTrade*$tokenX.decimalPlaces))
+            $YBid = ([int64][math]::Round(($MaxXTokenPerTrade*$buyPrice*$tokenY.decimalPlaces)))
+            $YAsk = ([int64][math]::Round(($MaxXTokenPerTrade*$sellPrice*$TokenY.decimalPlaces)))
+        }
+
+        if($MaxYTokenPerTrade -gt 0){
+            $XAsk = ([int64]($MaxYTokenPerTrade*$buyPrice*$tokenX.decimalPlaces))
+            $XBid = ([int64]($MaxYTokenPerTrade*$sellPrice*$tokenX.decimalPlaces))
+        }
 
         # Create an object for this row
         $row = [PSCustomObject]@{
             ID          = $currentPosition
-            Price       = [math]::Round($priceLevel, 2)
+            Price       = [math]::Round($priceLevel, 3)
             Bid         = [ordered]@{
                 price = ([math]::Round($buyPrice, 2))
-                tokenX = ([math]::Round($TokenXPerTrade,3))
-                tokenY = ([math]::Round(($tokenXPerTrade*$buyPrice),3))
+                tokenX = ([math]::Round($MaxXTokenPerTrade,3))
+                tokenY = ([math]::Round(($MaxXTokenPerTrade*$buyPrice),3))
                 offer = [ordered]@{
-                    ($tokenY.id) = (-1*[int64][math]::Round(($tokenXPerTrade*$buyPrice*$tokenY.decimalPlaces)))
-                    ($tokenX.id) = ([int64]($TokenXPerTrade*$tokenX.decimalPlaces))  
+                    ($tokenY.id) = (-1*($YBid))
+                    ($tokenX.id) = $XBid
                 }
                 side = "Bid"
                 currentPosition = $currentPosition
@@ -70,11 +91,12 @@ function New-GridTradingTable {
             }
             Ask = [ordered]@{
                 price = ([math]::Round($sellPrice, 2))
-                tokenX = ([math]::Round($TokenXPerTrade,3))
-                tokenY = ([math]::Round(($tokenXPerTrade*$sellPrice),3))
+                tokenX = ([math]::Round($MaxXTokenPerTrade,3))
+                tokenY = ([math]::Round(($MaxXTokenPerTrade*$sellPrice),3))
                 offer = [ordered]@{
-                    ($tokenY.id) = ([int64][math]::Round(($tokenXPerTrade*$sellPrice*$TokenY.decimalPlaces)))
-                    ($tokenX.id) =  (-1*([int64]($TokenXPerTrade*$tokenX.decimalPlaces)))
+                    ($tokenY.id) = ($YAsk)
+                    ($tokenX.id) =  (-1*($XAsk))
+                    #($tokenX.id) =  (-1*([int64]($MaxXTokenPerTrade*$tokenX.decimalPlaces)))
                 }
                 side = "Ask"
                 currentPosition = $currentPosition
